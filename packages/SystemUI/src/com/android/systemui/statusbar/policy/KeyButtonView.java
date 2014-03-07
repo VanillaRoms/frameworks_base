@@ -295,11 +295,6 @@ public class KeyButtonView extends ImageView {
                         removeCallbacks(mCheckLongPress);
                         postDelayed(mCheckLongPress, mLongPressTimeout);
                     }
-                    if (mClickAction != null && mClickAction.equals(ButtonsConstants.ACTION_RECENTS)
-                            || mLongpressAction != null
-                                    && mLongpressAction.equals(ButtonsConstants.ACTION_RECENTS)) {
-                    preloadRecentApps();                    
-                    }
                     if (hasSingleTapAction()) {
                         postDelayed(mSingleTap, mSinglePressTimeout);
                     }
