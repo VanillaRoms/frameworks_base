@@ -76,7 +76,9 @@ import java.util.List;
  */
 public class ThemeService extends IThemeService.Stub {
     private static final String TAG = ThemeService.class.getName();
-    private static final int DELAY_APPLY_DEFAULT_THEME = 1000;
+
+    private static final String GOOGLE_SETUPWIZARD_PACKAGE = "com.google.android.setupwizard";
+    private static final String CM_SETUPWIZARD_PACKAGE = "com.cyanogenmod.account";
 
     private HandlerThread mWorker;
     private ThemeWorkerHandler mHandler;
@@ -152,7 +154,7 @@ public class ThemeService extends IThemeService.Stub {
         }
 
         if (components == null || components.size() == 0) {
-            postFinish(true, pkgName);
+            postFinish(true, pkgName, components);
             return;
         }
 
@@ -216,7 +218,7 @@ public class ThemeService extends IThemeService.Stub {
 
         killLaunchers();
 
-        postFinish(true, pkgName);
+        postFinish(true, pkgName, components);
     }
 
     private void doApplyDefaultTheme() {
@@ -598,7 +600,8 @@ public class ThemeService extends IThemeService.Stub {
 
         List<ResolveInfo> infos = pm.queryIntentActivities(homeIntent, 0);
         for(ResolveInfo info : infos) {
-            if (info.activityInfo != null && info.activityInfo.applicationInfo != null) {
+            if (info.activityInfo != null && info.activityInfo.applicationInfo != null &&
+                    !isSetupActivity(info)) {
                 String pkgToStop = info.activityInfo.applicationInfo.packageName;
                 Log.d(TAG, "Force stopping " +  pkgToStop + " for theme change");
                 try {
@@ -608,6 +611,11 @@ public class ThemeService extends IThemeService.Stub {
                 }
             }
         }
+    }
+
+    private boolean isSetupActivity(ResolveInfo info) {
+        return GOOGLE_SETUPWIZARD_PACKAGE.equals(info.activityInfo.packageName) ||
+               CM_SETUPWIZARD_PACKAGE.equals(info.activityInfo.packageName);
     }
 
     private void postProgress(String pkgName) {
@@ -623,7 +631,7 @@ public class ThemeService extends IThemeService.Stub {
         mClients.finishBroadcast();
     }
 
-    private void postFinish(boolean isSuccess, String pkgName) {
+    private void postFinish(boolean isSuccess, String pkgName, List<String> components) {
         synchronized(this) {
             mProgress = 0;
             mPkgName = null;
@@ -642,9 +650,21 @@ public class ThemeService extends IThemeService.Stub {
 
         // if successful, broadcast that the theme changed
         if (isSuccess) {
-            mContext.sendBroadcastAsUser(new Intent(ThemeUtils.ACTION_THEME_CHANGED),
-                    UserHandle.ALL);
+            broadcastThemeChange(components);
         }
+    }
+
+    private void broadcastThemeChange(List<String> components) {
+        StringBuilder sb = new StringBuilder();
+        String delimiter = "";
+        for (String comp : components) {
+            sb.append(delimiter);
+            sb.append(comp);
+            delimiter = "|";
+        }
+        final Intent intent = new Intent(ThemeUtils.ACTION_THEME_CHANGED);
+        intent.putExtra("components", sb.toString());
+        mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
     }
 
     private void incrementProgress(int increment, String pkgName) {
@@ -685,7 +705,7 @@ public class ThemeService extends IThemeService.Stub {
                 Manifest.permission.ACCESS_THEME_MANAGER, null);
         Message msg = Message.obtain();
         msg.what = ThemeWorkerHandler.MESSAGE_APPLY_DEFAULT_THEME;
-        mHandler.sendMessageDelayed(msg, DELAY_APPLY_DEFAULT_THEME);
+        mHandler.sendMessage(msg);
     }
 
     @Override
