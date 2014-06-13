@@ -32,6 +32,7 @@ import static libcore.io.OsConstants.S_IXGRP;
 import static libcore.io.OsConstants.S_IROTH;
 import static libcore.io.OsConstants.S_IXOTH;
 
+import android.app.ComposedIconInfo;
 import android.content.res.AssetManager;
 import android.util.Pair;
 import com.android.internal.app.IMediaContainerService;
@@ -141,6 +142,8 @@ import android.view.WindowManagerPolicy;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedWriter;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -150,12 +153,11 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.cert.CertificateException;
@@ -175,6 +177,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import libcore.io.ErrnoException;
 import libcore.io.IoUtils;
@@ -237,7 +241,8 @@ public class PackageManagerService extends IPackageManager.Stub {
     static final int SCAN_UPDATE_TIME = 1<<6;
     static final int SCAN_DEFER_DEX = 1<<7;
     static final int SCAN_BOOTING = 1<<8;
-    static final int SCAN_TRUSTED_OVERLAY = 1<<9;
+    static final int SCAN_DELETE_DATA_ON_FAILURES = 1<<9;
+    static final int SCAN_TRUSTED_OVERLAY = 1<<10;
 
     static final int REMOVE_CHATTY = 1<<16;
 
@@ -380,7 +385,6 @@ public class PackageManagerService extends IPackageManager.Stub {
             new HashMap<String, PackageParser.Package>();
 
     // Information for the parser to write more useful error messages.
-    File mScanningPath;
     int mLastScanError;
 
     // ----------------------------------------------------------------
@@ -940,7 +944,7 @@ public class PackageManagerService extends IPackageManager.Stub {
                                     int[] uidArray = new int[] { res.pkg.applicationInfo.uid };
                                     ArrayList<String> pkgList = new ArrayList<String>(1);
                                     pkgList.add(res.pkg.applicationInfo.packageName);
-                                    sendResourcesChangedBroadcast(true, false,
+                                    sendResourcesChangedBroadcast(true, true,
                                             pkgList,uidArray, null);
                                 }
                             }
@@ -1579,6 +1583,21 @@ public class PackageManagerService extends IPackageManager.Stub {
                 mSettings.readDefaultPreferredAppsLPw(this, 0);
             }
 
+            // Disable components marked for disabling at build-time
+            for (String name : mContext.getResources().getStringArray(
+                    com.android.internal.R.array.config_disabledComponents)) {
+                ComponentName cn = ComponentName.unflattenFromString(name);
+                Slog.v(TAG, "Disabling " + name);
+                String className = cn.getClassName();
+                PackageSetting pkgSetting = mSettings.mPackages.get(cn.getPackageName());
+                if (pkgSetting == null || pkgSetting.pkg == null
+                        || !pkgSetting.pkg.hasComponentClassName(className)) {
+                    Slog.w(TAG, "Unable to disable " + name);
+                    continue;
+                }
+                pkgSetting.disableComponentLPw(className, UserHandle.USER_OWNER);
+            }
+
             // can downgrade to reader
             mSettings.writeLPr();
 
@@ -1972,8 +1991,7 @@ public class PackageManagerService extends IPackageManager.Stub {
             if((ps == null) || (ps.pkg == null) || (ps.pkg.applicationInfo == null)) {
                 return -1;
             }
-            p = ps.pkg;
-            return p != null ? UserHandle.getUid(userId, p.applicationInfo.uid) : -1;
+            return UserHandle.getUid(userId, ps.pkg.applicationInfo.uid);
         }
     }
 
@@ -4337,7 +4355,6 @@ public class PackageManagerService extends IPackageManager.Stub {
             mLastScanError = PackageManager.INSTALL_FAILED_INVALID_APK;
             return null;
         }
-        mScanningPath = scanFile;
 
         if ((parseFlags&PackageParser.PARSE_IS_SYSTEM) != 0) {
             pkg.applicationInfo.flags |= ApplicationInfo.FLAG_SYSTEM;
@@ -4357,7 +4374,7 @@ public class PackageManagerService extends IPackageManager.Stub {
                 if (mAndroidApplication != null) {
                     Slog.w(TAG, "*************************************************");
                     Slog.w(TAG, "Core android package being redefined.  Skipping.");
-                    Slog.w(TAG, " file=" + mScanningPath);
+                    Slog.w(TAG, " file=" + scanFile);
                     Slog.w(TAG, "*************************************************");
                     mLastScanError = PackageManager.INSTALL_FAILED_DUPLICATE_PACKAGE;
                     return null;
@@ -4845,6 +4862,10 @@ public class PackageManagerService extends IPackageManager.Stub {
         if ((scanMode&SCAN_NO_DEX) == 0) {
             if (performDexOptLI(pkg, forceDex, (scanMode&SCAN_DEFER_DEX) != 0, false)
                     == DEX_OPT_FAILED) {
+                if ((scanMode & SCAN_DELETE_DATA_ON_FAILURES) != 0) {
+                    removeDataDirsLI(pkg.packageName);
+                }
+
                 mLastScanError = PackageManager.INSTALL_FAILED_DEXOPT;
                 return null;
             }
@@ -4922,6 +4943,10 @@ public class PackageManagerService extends IPackageManager.Stub {
                     PackageParser.Package clientPkg = clientLibPkgs.get(i);
                     if (performDexOptLI(clientPkg, forceDex, (scanMode&SCAN_DEFER_DEX) != 0, false)
                             == DEX_OPT_FAILED) {
+                        if ((scanMode & SCAN_DELETE_DATA_ON_FAILURES) != 0) {
+                            removeDataDirsLI(pkg.packageName);
+                        }
+
                         mLastScanError = PackageManager.INSTALL_FAILED_DEXOPT;
                         return null;
                     }
@@ -5338,7 +5363,7 @@ public class PackageManagerService extends IPackageManager.Stub {
 
             //Icon Packs need aapt too
             //TODO: No need to run aapt on icons for every startup...
-            if (pkg.hasIconPack) {
+            if (isIconCompileNeeded(pkg)) {
                 try {
                     ThemeUtils.createCacheDirIfNotExists();
                     ThemeUtils.createIconDirIfNotExists(pkg.packageName);
@@ -5352,6 +5377,29 @@ public class PackageManagerService extends IPackageManager.Stub {
         }
 
         return pkg;
+    }
+
+
+    private boolean isIconCompileNeeded(Package pkg) {
+        if (!pkg.hasIconPack) return false;
+        // Read in the stored hash value and compare to the pkgs computed hash value
+        FileInputStream in = null;
+        DataInputStream dataInput = null;
+        try {
+            String hashFile = ThemeUtils.getIconHashFile(pkg.packageName);
+            in = new FileInputStream(hashFile);
+            dataInput = new DataInputStream(in);
+            int storedHashCode = dataInput.readInt();
+            int actualHashCode = getPackageHashCode(pkg);
+            return storedHashCode != actualHashCode;
+        } catch(IOException e) {
+            Log.e(TAG, "Could not read hash for " + pkg + "not compiling icon pack", e);
+        } finally {
+            IoUtils.closeQuietly(in);
+            IoUtils.closeQuietly(dataInput);
+        }
+
+        return true;
     }
 
     private void compileResourcesAndIdmapIfNeeded(PackageParser.Package targetPkg,
@@ -5419,10 +5467,19 @@ public class PackageManagerService extends IPackageManager.Stub {
 
     private void compileIconPack(Package pkg) throws Exception {
         if (DEBUG_PACKAGE_SCANNING) Log.d(TAG, "  Compile resource table for " + pkg.packageName);
+        OutputStream out = null;
+        DataOutputStream dataOut = null;
         try {
             createTempManifest(pkg.packageName);
+            int code = getPackageHashCode(pkg);
+            String hashFile = ThemeUtils.getIconHashFile(pkg.packageName);
+            out = new FileOutputStream(hashFile);
+            dataOut = new DataOutputStream(out);
+            dataOut.writeInt(code);
             compileIconsWithAapt(pkg);
         } finally {
+            IoUtils.closeQuietly(out);
+            IoUtils.closeQuietly(dataOut);
             cleanupTempManifest();
         }
     }
@@ -5549,7 +5606,6 @@ public class PackageManagerService extends IPackageManager.Stub {
            String idmapPath = getIdmapPath(appPkg, opkg);
            new File(idmapPath).delete();
         }
-        mOverlays.remove(appPkg.packageName);
     }
 
     private void recursiveDelete(File f) {
@@ -5709,21 +5765,27 @@ public class PackageManagerService extends IPackageManager.Stub {
             mPackageHashes.remove(p);
         }
 
-        byte[] md5 = getFileMd5Sum(pkg.mPath);
-        if (md5 == null) return 0;
+        byte[] crc = getFileCrC(pkg.mPath);
+        if (crc == null) return 0;
 
-        p = new Pair(Arrays.hashCode(ByteBuffer.wrap(md5).put(IDMAP_HASH_VERSION).array()),
+        p = new Pair(Arrays.hashCode(ByteBuffer.wrap(crc).put(IDMAP_HASH_VERSION).array()),
                 System.currentTimeMillis());
         mPackageHashes.put(pkg.packageName, p);
         return p.first;
     }
 
-    private byte[] getFileMd5Sum(String path) {
+    private byte[] getFileCrC(String path) {
         try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            DigestInputStream dis = new DigestInputStream(new FileInputStream(path), md);
-            dis.close();
-            return md.digest();
+            ZipFile zfile = new ZipFile(path);
+            ZipEntry entry = zfile.getEntry("META-INF/MANIFEST.MF");
+            if (entry == null) {
+                Log.e(TAG, "Unable to get MANIFEST.MF from " + path);
+                return null;
+            }
+
+            long crc = entry.getCrc();
+            if (crc == -1) Log.e(TAG, "Unable to get CRC for " + path);
+            return ByteBuffer.allocate(8).putLong(crc).array();
         } catch (Exception e) {
         }
         return null;
@@ -9739,7 +9801,7 @@ public class PackageManagerService extends IPackageManager.Stub {
             replacePackageLI(pkg, parseFlags, scanMode, args.user,
                     installerPackageName, res);
         } else {
-            installNewPackageLI(pkg, parseFlags, scanMode, args.user,
+            installNewPackageLI(pkg, parseFlags, scanMode | SCAN_DELETE_DATA_ON_FAILURES, args.user,
                     installerPackageName, res);
         }
         synchronized (mPackages) {
@@ -11265,7 +11327,8 @@ public class PackageManagerService extends IPackageManager.Stub {
 
         DumpState dumpState = new DumpState();
         boolean fullPreferred = false;
-        
+        boolean checkin = false;
+
         String packageName = null;
         
         int opti = 0;
@@ -11279,7 +11342,8 @@ public class PackageManagerService extends IPackageManager.Stub {
                 // Right now we only know how to print all.
             } else if ("-h".equals(opt)) {
                 pw.println("Package manager dump options:");
-                pw.println("  [-h] [-f] [cmd] ...");
+                pw.println("  [-h] [-f] [--checkin] [cmd] ...");
+                pw.println("    --checkin: dump for a checkin");
                 pw.println("    -f: print details of intent filters");
                 pw.println("    -h: print this help");
                 pw.println("  cmd may be one of:");
@@ -11297,13 +11361,15 @@ public class PackageManagerService extends IPackageManager.Stub {
                 pw.println("    <package.name>: info about given package");
                 pw.println("    k[eysets]: print known keysets");
                 return;
+            } else if ("--checkin".equals(opt)) {
+                checkin = true;
             } else if ("-f".equals(opt)) {
                 dumpState.setOptionEnabled(DumpState.OPTION_SHOW_FILTERS);
             } else {
                 pw.println("Unknown argument: " + opt + "; use -h for help");
             }
         }
-        
+
         // Is the caller requesting to dump a particular piece of data?
         if (opti < args.length) {
             String cmd = args[opti];
@@ -11345,17 +11411,26 @@ public class PackageManagerService extends IPackageManager.Stub {
             }
         }
 
+        if (checkin) {
+            pw.println("vers,1");
+        }
+
         // reader
         synchronized (mPackages) {
             if (dumpState.isDumping(DumpState.DUMP_VERIFIERS) && packageName == null) {
-                if (dumpState.onTitlePrinted())
-                    pw.println();
-                pw.println("Verifiers:");
-                pw.print("  Required: ");
-                pw.print(mRequiredVerifierPackage);
-                pw.print(" (uid=");
-                pw.print(getPackageUid(mRequiredVerifierPackage, 0));
-                pw.println(")");
+                if (!checkin) {
+                    if (dumpState.onTitlePrinted())
+                        pw.println();
+                    pw.println("Verifiers:");
+                    pw.print("  Required: ");
+                    pw.print(mRequiredVerifierPackage);
+                    pw.print(" (uid=");
+                    pw.print(getPackageUid(mRequiredVerifierPackage, 0));
+                    pw.println(")");
+                } else if (mRequiredVerifierPackage != null) {
+                    pw.print("vrfy,"); pw.print(mRequiredVerifierPackage);
+                    pw.print(","); pw.println(getPackageUid(mRequiredVerifierPackage, 0));
+                }
             }
 
             if (dumpState.isDumping(DumpState.DUMP_LIBS) && packageName == null) {
@@ -11364,21 +11439,37 @@ public class PackageManagerService extends IPackageManager.Stub {
                 while (it.hasNext()) {
                     String name = it.next();
                     SharedLibraryEntry ent = mSharedLibraries.get(name);
-                    if (!printedHeader) {
-                        if (dumpState.onTitlePrinted())
-                            pw.println();
-                        pw.println("Libraries:");
-                        printedHeader = true;
-                    }
-                    pw.print("  ");
-                    pw.print(name);
-                    pw.print(" -> ");
-                    if (ent.path != null) {
-                        pw.print("(jar) ");
-                        pw.print(ent.path);
+                    if (!checkin) {
+                        if (!printedHeader) {
+                            if (dumpState.onTitlePrinted())
+                                pw.println();
+                            pw.println("Libraries:");
+                            printedHeader = true;
+                        }
+                        pw.print("  ");
                     } else {
-                        pw.print("(apk) ");
-                        pw.print(ent.apk);
+                        pw.print("lib,");
+                    }
+                    pw.print(name);
+                    if (!checkin) {
+                        pw.print(" -> ");
+                    }
+                    if (ent.path != null) {
+                        if (!checkin) {
+                            pw.print("(jar) ");
+                            pw.print(ent.path);
+                        } else {
+                            pw.print(",jar,");
+                            pw.print(ent.path);
+                        }
+                    } else {
+                        if (!checkin) {
+                            pw.print("(apk) ");
+                            pw.print(ent.apk);
+                        } else {
+                            pw.print(",apk,");
+                            pw.print(ent.apk);
+                        }
                     }
                     pw.println();
                 }
@@ -11387,16 +11478,22 @@ public class PackageManagerService extends IPackageManager.Stub {
             if (dumpState.isDumping(DumpState.DUMP_FEATURES) && packageName == null) {
                 if (dumpState.onTitlePrinted())
                     pw.println();
-                pw.println("Features:");
+                if (!checkin) {
+                    pw.println("Features:");
+                }
                 Iterator<String> it = mAvailableFeatures.keySet().iterator();
                 while (it.hasNext()) {
                     String name = it.next();
-                    pw.print("  ");
+                    if (!checkin) {
+                        pw.print("  ");
+                    } else {
+                        pw.print("feat,");
+                    }
                     pw.println(name);
                 }
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_RESOLVERS)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_RESOLVERS)) {
                 if (mActivities.dump(pw, dumpState.getTitlePrinted() ? "\nActivity Resolver Table:"
                         : "Activity Resolver Table:", "  ", packageName,
                         dumpState.isOptionEnabled(DumpState.OPTION_SHOW_FILTERS))) {
@@ -11419,7 +11516,7 @@ public class PackageManagerService extends IPackageManager.Stub {
                 }
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_PREFERRED)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_PREFERRED)) {
                 for (int i=0; i<mSettings.mPreferredActivities.size(); i++) {
                     PreferredIntentResolver pir = mSettings.mPreferredActivities.valueAt(i);
                     int user = mSettings.mPreferredActivities.keyAt(i);
@@ -11433,7 +11530,7 @@ public class PackageManagerService extends IPackageManager.Stub {
                 }
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_PREFERRED_XML)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_PREFERRED_XML)) {
                 pw.flush();
                 FileOutputStream fout = new FileOutputStream(fd);
                 BufferedOutputStream str = new BufferedOutputStream(fout);
@@ -11455,11 +11552,11 @@ public class PackageManagerService extends IPackageManager.Stub {
                 }
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_PERMISSIONS)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_PERMISSIONS)) {
                 mSettings.dumpPermissionsLPr(pw, packageName, dumpState);
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_PROVIDERS)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_PROVIDERS)) {
                 boolean printedSomething = false;
                 for (PackageParser.Provider p : mProviders.mProviders.values()) {
                     if (packageName != null && !packageName.equals(p.info.packageName)) {
@@ -11496,19 +11593,19 @@ public class PackageManagerService extends IPackageManager.Stub {
                 }
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_KEYSETS)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_KEYSETS)) {
                 mSettings.mKeySetManager.dump(pw, packageName, dumpState);
             }
 
             if (dumpState.isDumping(DumpState.DUMP_PACKAGES)) {
-                mSettings.dumpPackagesLPr(pw, packageName, dumpState);
+                mSettings.dumpPackagesLPr(pw, packageName, dumpState, checkin);
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_SHARED_USERS)) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_SHARED_USERS)) {
                 mSettings.dumpSharedUsersLPr(pw, packageName, dumpState);
             }
 
-            if (dumpState.isDumping(DumpState.DUMP_MESSAGES) && packageName == null) {
+            if (!checkin && dumpState.isDumping(DumpState.DUMP_MESSAGES) && packageName == null) {
                 if (dumpState.onTitlePrinted())
                     pw.println();
                 mSettings.dumpReadMessagesLPr(pw, dumpState);
@@ -11751,7 +11848,7 @@ public class PackageManagerService extends IPackageManager.Stub {
             if (uidArr != null) {
                 extras.putIntArray(Intent.EXTRA_CHANGED_UID_LIST, uidArr);
             }
-            if (replacing && !mediaStatus) {
+            if (replacing) {
                 extras.putBoolean(Intent.EXTRA_REPLACING, replacing);
             }
             String action = mediaStatus ? Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE
@@ -12277,6 +12374,11 @@ public class PackageManagerService extends IPackageManager.Stub {
                 "could not update icon mapping because caller does not have change config permission");
 
         synchronized (mPackages) {
+            ThemeUtils.clearIconCache();
+            if (pkgName == null) {
+                clearIconMapping();
+                return;
+            }
             mIconPackHelper = new IconPackHelper(mContext);
             try {
                 mIconPackHelper.loadIconPack(pkgName);
@@ -12287,14 +12389,13 @@ public class PackageManagerService extends IPackageManager.Stub {
             }
 
             for (Activity activity : mActivities.mActivities.values()) {
-                int id = mIconPackHelper
-                        .getResourceIdForActivityIcon(activity.info);
-                activity.info.themedIcon = id;
+                activity.info.themedIcon =
+                        mIconPackHelper.getResourceIdForActivityIcon(activity.info);
             }
 
             for (Package pkg : mPackages.values()) {
-                int id = mIconPackHelper.getResourceIdForApp(pkg.packageName);
-                pkg.applicationInfo.themedIcon = id;
+                pkg.applicationInfo.themedIcon =
+                        mIconPackHelper.getResourceIdForApp(pkg.packageName);
             }
         }
     }
@@ -12308,5 +12409,10 @@ public class PackageManagerService extends IPackageManager.Stub {
         for (Package pkg : mPackages.values()) {
             pkg.applicationInfo.themedIcon = 0;
         }
+    }
+
+    @Override
+    public ComposedIconInfo getComposedIconInfo() {
+        return mIconPackHelper != null ? mIconPackHelper.getComposedIconInfo() : null;
     }
 }
