@@ -295,12 +295,11 @@ public class KeyButtonView extends ImageView {
                         removeCallbacks(mCheckLongPress);
                         postDelayed(mCheckLongPress, mLongPressTimeout);
                     }
-
                     if (hasSingleTapAction()) {
                         postDelayed(mSingleTap, mSinglePressTimeout);
                     }
                 }
-                break;
+                break;            
             case MotionEvent.ACTION_MOVE:
                 x = (int) ev.getX();
                 y = (int) ev.getY();

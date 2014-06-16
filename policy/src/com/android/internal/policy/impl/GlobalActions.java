@@ -428,6 +428,25 @@ class GlobalActions implements DialogInterface.OnDismissListener, DialogInterfac
             mItems.add(mImmersiveModeOn);
          }
 
+        if (mScreenrecordOption != 0) {
+            // next: screenrecord
+            mItems.add(
+                new SinglePressAction(R.drawable.ic_lock_screen_record, R.string.global_action_screenrecord) {
+                    public void onPress() {
+                        takeScreenrecord();
+                    }
+
+                    public boolean showDuringKeyguard() {
+                        boolean toggle = checkOptionAndKeyguard(mScreenrecordOption);
+                        return toggle;
+                    }
+
+                    public boolean showBeforeProvisioning() {
+                        return true;
+                    }
+             });
+         }
+
         // next: bug report, if enabled
         if (Settings.Global.getInt(mContext.getContentResolver(),
                 Settings.Global.BUGREPORT_IN_POWER_MENU, 0) != 0 && isCurrentUserOwner()) {
