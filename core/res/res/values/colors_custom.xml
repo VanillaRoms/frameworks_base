@@ -17,8 +17,5 @@
  */
 -->
 <resources>
-    <color name="default_dialog_text_holo_dark">@android:color/holo_blue_light</color>
-    <color name="default_dialog_text_holo_light">@android:color/holo_blue_light</color>
-    <color name="default_dialog_divider_holo_dark">@android:color/holo_blue_light</color>
-    <color name="default_dialog_divider_holo_light">@android:color/holo_blue_light</color>
+empty
 </resources>
