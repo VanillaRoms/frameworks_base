@@ -145,10 +145,10 @@
     <color name="dim_foreground_inverse_holo_light">#bebebe</color>
     <color name="dim_foreground_inverse_disabled_holo_light">#80bebebe</color>
     <color name="hint_foreground_holo_light">#808080</color>
-    <color name="highlighted_text_holo_dark">#6633b5e5</color>
-    <color name="highlighted_text_holo_light">#6633b5e5</color>
-    <color name="link_text_holo_dark">#5c5cff</color>
-    <color name="link_text_holo_light">#0000ee</color>
+    <color name="highlighted_text_holo_dark">#3b77e7</color>
+    <color name="highlighted_text_holo_light">#3b77e7</color>
+    <color name="link_text_holo_dark">#3b77e7</color>
+    <color name="link_text_holo_light">#3b77e7</color>
 
     <!-- Group buttons -->
     <eat-comment />
@@ -202,6 +202,6 @@
     <color name="keyguard_avatar_frame_pressed_color">#ff35b5e5</color>
 
     <color name="accessibility_focus_highlight">#80ffff00</color>
-    <color name="settings_list_seperator">#ff3b77e7</color>
+    <color name="settings_list_seperator">#3b77e7</color>
 </resources>
 
