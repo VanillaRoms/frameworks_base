@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.pm.ThemeUtils;
 import android.database.ContentObserver;
 import android.location.LocationManager;
 import android.net.wifi.WifiManager;
@@ -102,6 +103,7 @@ public class ToggleManager {
     public static final String WIRELESS_ADB_TOGGLE = "WIRELESSADB";
     public static final String IMMERSIVE_MODE_TOGGLE = "IMMERSIVE_MODE";
     public static final String SCREENRECORD_TOGGLE = "SCREENRECORD";
+    public static final String HEADSUP_TOGGLE = "HEADSUP";
 
     private int mStyle;
 
@@ -180,6 +182,7 @@ public class ToggleManager {
             // no toggle
             // toggleMap.put(BT_TETHER_TOGGLE, null);
             toggleMap.put(IMMERSIVE_MODE_TOGGLE, ImmersiveModeToggle.class);
+            toggleMap.put(HEADSUP_TOGGLE, HeadsUpToggle.class);
         }
         return toggleMap;
     }
@@ -193,12 +196,17 @@ public class ToggleManager {
         mBroadcastReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                Intent broadcast = new Intent(ACTION_BROADCAST_TOGGLES);
-                broadcast.putExtra("toggle_bundle", ToggleManager.this.getAvailableToggles());
-                context.sendBroadcast(broadcast);
+                if (ACTION_REQUEST_TOGGLES.equals(intent.getAction())) {
+                    Intent broadcast = new Intent(ACTION_BROADCAST_TOGGLES);
+                    broadcast.putExtra("toggle_bundle", ToggleManager.this.getAvailableToggles());
+                    context.sendBroadcast(broadcast);
+                } else if (ThemeUtils.ACTION_THEME_CHANGED.equals(intent.getAction())) {
+                    updateSettings();
+                }
             }
         };
         mContext.registerReceiver(mBroadcastReceiver, new IntentFilter(ACTION_REQUEST_TOGGLES));
+        mContext.registerReceiver(mBroadcastReceiver, new IntentFilter(ThemeUtils.ACTION_THEME_CHANGED));
     }
 
     public void cleanup() {

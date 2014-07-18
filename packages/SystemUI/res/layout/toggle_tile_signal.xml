@@ -25,7 +25,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
-        android:paddingBottom="10dp" >
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginBottom="10dp" >
 
         <ImageView
             android:id="@+id/rssi_image"
@@ -39,6 +40,22 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center" />
     </FrameLayout>
+
+    <ImageView
+        android:id="@+id/activity_in"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:src="@drawable/ic_qs_signal_in"
+        android:layout_toRightOf="@id/rssi_frame"
+        android:layout_alignBottom="@id/rssi_frame" />
+
+    <ImageView
+        android:id="@+id/activity_out"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:src="@drawable/ic_qs_signal_out"
+        android:layout_toRightOf="@id/rssi_frame"
+        android:layout_alignBottom="@id/rssi_frame" />
 
     <TextView
         android:id="@+id/rssi_textview"

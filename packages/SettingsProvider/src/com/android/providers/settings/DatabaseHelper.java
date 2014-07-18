@@ -1976,11 +1976,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     private void loadHeadsUpSetting(SQLiteStatement stmt) {
-        String headsUpValues = mContext.getResources()
-                .getString(R.string.def_heads_up_notification_values);
-        if (!TextUtils.isEmpty(headsUpValues)) {
+        String dndValues = mContext.getResources()
+                .getString(R.string.def_heads_up_notification_dnd_values);
+        String blackListValues = mContext.getResources()
+                .getString(R.string.def_heads_up_notification_blacklist_values);
+        if (!TextUtils.isEmpty(dndValues)) {
             loadSetting(stmt, Settings.AOKP.HEADS_UP_NOTIFICATION, "0");
-            loadSetting(stmt, Settings.AOKP.HEADS_UP_CUSTOM_VALUES, headsUpValues);
+            loadSetting(stmt, Settings.AOKP.HEADS_UP_CUSTOM_VALUES, dndValues);
+            loadSetting(stmt, Settings.AOKP.HEADS_UP_BLACKLIST_VALUES, blackListValues);
         }
     }
 
@@ -2074,6 +2077,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
             loadIntegerSetting(stmt, Settings.AOKP.UI_FORCE_OVERFLOW_BUTTON,
                     R.integer.def_force_overflow_button);
+            loadIntegerSetting(stmt, Settings.AOKP.SCREENSHOT_MODE_OPTIONS,
+                    R.integer.def_screenshot_mode_options);
+            loadIntegerSetting(stmt, Settings.AOKP.IMMERSIVE_MODE_OPTIONS,
+                    R.integer.def_immersive_mode_options);
         } finally {
             if (stmt != null) stmt.close();
         }

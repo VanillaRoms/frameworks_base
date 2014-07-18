@@ -29,6 +29,8 @@ import android.os.FileUtils;
 import android.os.SystemProperties;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.provider.ThemesContract;
+import android.provider.ThemesContract.ThemesColumns;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -44,12 +46,14 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
-import static android.content.res.CustomTheme.HOLO_DEFAULT;
+import static android.content.res.ThemeConfig.HOLO_DEFAULT;
 
 /**
  * @hide
@@ -513,19 +517,10 @@ public class ThemeUtils {
     }
 
     public static String getLockscreenWallpaperPath(AssetManager assetManager) throws IOException {
-        final String WALLPAPER_JPG = "wallpaper.jpg";
-        final String WALLPAPER_PNG = "wallpaper.png";
-
         String[] assets = assetManager.list("lockscreen");
         if (assets == null || assets.length == 0) return null;
-        for (String asset : assets) {
-            if (WALLPAPER_JPG.equals(asset)) {
-                return "lockscreen/" + WALLPAPER_JPG;
-            } else if (WALLPAPER_PNG.equals(asset)) {
-                return "lockscreen/" + WALLPAPER_PNG;
-            }
-        }
-        return null;
+
+        return "lockscreen/" + assets[0];
     }
 
     public static String getWallpaperPath(AssetManager assetManager) throws IOException {
@@ -564,5 +559,47 @@ public class ThemeUtils {
         public String getPackageName() {
             return mPackageName;
         }
+    }
+
+    // Returns a mutable list of all theme components
+    public static List<String> getAllComponents() {
+        List<String> components = new ArrayList<String>(9);
+        components.add(ThemesColumns.MODIFIES_FONTS);
+        components.add(ThemesColumns.MODIFIES_LAUNCHER);
+        components.add(ThemesColumns.MODIFIES_ALARMS);
+        components.add(ThemesColumns.MODIFIES_BOOT_ANIM);
+        components.add(ThemesColumns.MODIFIES_ICONS);
+        components.add(ThemesColumns.MODIFIES_LOCKSCREEN);
+        components.add(ThemesColumns.MODIFIES_NOTIFICATIONS);
+        components.add(ThemesColumns.MODIFIES_OVERLAYS);
+        components.add(ThemesColumns.MODIFIES_RINGTONES);
+        components.add(ThemesColumns.MODIFIES_STATUS_BAR);
+        components.add(ThemesColumns.MODIFIES_NAVIGATION_BAR);
+        return components;
+    }
+
+    /**
+     *  Returns a mutable list of all the theme components supported by a given package
+     *  NOTE: This queries the themes content provider. If there isn't a provider installed
+     *  or if it is too early in the boot process this method will not work.
+     */
+    public static List<String> getSupportedComponents(Context context, String pkgName) {
+        List<String> supportedComponents = new ArrayList<String>();
+
+        String selection = ThemesContract.ThemesColumns.PKG_NAME + "= ?";
+        String[] selectionArgs = new String[]{ pkgName };
+        Cursor c = context.getContentResolver().query(ThemesContract.ThemesColumns.CONTENT_URI,
+                null, selection, selectionArgs, null);
+
+        if (c != null && c.moveToFirst()) {
+            List<String> allComponents = getAllComponents();
+            for(String component : allComponents) {
+                int index = c.getColumnIndex(component);
+                if (c.getInt(index) == 1) {
+                    supportedComponents.add(component);
+                }
+            }
+        }
+        return supportedComponents;
     }
 }
